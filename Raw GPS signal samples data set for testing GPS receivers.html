@@ -1,0 +1,91 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html>
+<head>
+
+<title>Raw GPS signal samples data set for testing GPS receivers</title>
+
+<style>
+	body {
+		margin: 0;
+		background: #fff url(cherokee-images/default-bg.png) center center repeat-y
+	}
+	
+	#S3sep13 {
+		margin: auto;
+		text-align: center;
+		width: 800px;
+		max-width: 800px;
+		border: 1px solid #fff;
+	}
+
+	.F3sep13 {
+		font-family: 'Trebuchet MS', 'Lucida Grande', Verdana, Arial, Sans-Serif;
+		background-color: #e6e6fa;
+		color: #000;
+		padding: 10px;
+		margin-top: 80px;
+		font-size: 120%;
+		text-align: left;
+	}
+
+	.img {
+		display: block;
+		margin-left: auto;
+		margin-right: auto;
+	}
+
+	code {
+		font-weight: bold;
+	}
+
+	.powered {
+		margin: 40px;
+		text-align: center;
+	}
+</style>
+
+</head>
+<body>
+
+<div id="S3sep13">
+<div class="F3sep13">
+<p style="font-size:20px"><b>Raw GPS signal samples data set for testing GPS receivers</b></p>
+
+<p>
+3-Sep-2013
+<br><br>
+Raw GPS signal sample data can be a little hard to find on the net. Here is a 56 MB file containing about 77 seconds of data:
+<a href="https://dl.dropboxusercontent.com/u/68809050/gps.samples.1bit.I.fs5456.if4092.bin"> gps.samples.1bit.I.fs5456.if4092.bin</a> [dropbox.com] <br>
+It was copied and re-formatted from Michele Bavaro's excellent GPS blog, although the file is not there now:
+<a href="http://michelebavaro.blogspot.com/2010_11_01_archive.html">
+michelebavaro.blogspot.com</a>
+</p>
+
+<p>
+The parameters of the file are: 1-bit sign I-only data (not I&Q, not 2 or 3-bit sign & magnitude), bit-packed Little Endian (i.e. start with bit 0 of byte 0), sample rate fs = 5.456 MHz, IF = 4.092 MHz (i.e. not a zero-IF signal -- you have to mix (xor) with 4.092 MHz in addition to the C/A code). As Michele's post mentions if your decoding works you should get a lat/lon position in Nottingham, UK.
+</p>
+
+<p>
+I used this file as input to a software simulation I wrote of the FPGA tracking parts of Andrew Holme's wonderful homemade GPS receiver documented here: 
+<a href="http://www.aholme.co.uk/GPS/Main.htm"> aholme.co.uk/GPS
+</a>
+</p>
+
+<p>
+Just using Andrew's FFT-based C++ search code alone immediately finds five signals:
+</p>
+
+<p>
+SV-0 PRN-1 lo_shift 6 ca_shift 1465 snr 108.7 <br>
+SV-20 PRN-21 lo_shift 8 ca_shift 686 snr 121.7 <br>
+SV-28 PRN-29 lo_shift -9 ca_shift 3868 snr 167.2 <br>
+SV-29 PRN-30 lo_shift -9 ca_shift 2998 snr 145.2 <br>
+SV-30 PRN-31 lo_shift -8 ca_shift 2337 snr 121.3
+</p>
+
+</div>
+</div>
+<br>
+
+</body>
+</html>

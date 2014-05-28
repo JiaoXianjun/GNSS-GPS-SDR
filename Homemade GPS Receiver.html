@@ -1,0 +1,938 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd"> 
+<html>
+<head>
+<meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+<title>Homemade GPS Receiver</title>
+<LINK rel=stylesheet type="text/css" href="../Style.css">
+<style type="text/css">
+.navo { background-color: #C0C0E0; font-size: x-small; }
+.nave { background-color: #E0C0C0; font-size: x-small; }
+div.bargraph { background-color: #A8E878; height: 14px }
+PRE {FONT-SIZE: 10pt; LINE-HEIGHT: 12pt;}
+.R {color: red}
+.G {color: green} 
+.B {color: blue}
+</style>
+</head>
+<body bgcolor="#ffffff" text="#000000">
+<h1>Homemade GPS Receiver</h1>
+<table width="100%">
+<tr>
+<td><a href="../Projects.htm">Back to projects</a></td>
+</tr>
+</table>
+<hr>
+<a href="BIG/Big_GPS3.jpg"><img alt="" width=695 height=289 src="IMG/FrontEnd.jpg"></a>
+<br>
+<p>
+Pictured above is the front-end, first mixer and IF amplifier of an experimental GPS receiver.
+The leftmost SMA is connected to a commercial antenna with integral LNA and SAW filter.
+A synthesized first local oscillator drives the bottom SMA.
+Pin headers to the right are power input and IF output.
+The latter is connected to a Xilinx FPGA which not only performs DSP,
+but also hosts a fractional-N frequency synthesizer.
+More on this later.
+<p>
+I was motivated to design this receiver after reading the work [<a href="http://lea.hamradio.si/~s53mv/navsats/theory.html">1</a>]
+of Matja&#x017E; Vidmar, S53MV, who developed a GPS receiver from scratch, using mainly discrete components, over 20 years ago.
+His use of DSP following a hard-limiting IF and 1-bit ADC interested me.
+The receiver described here works on the same principle.
+Its 1-bit ADC is the 6-pin IC near the pin headers, an LVDS-output comparator.
+Hidden under noise but not obliterated in the bi-level quantised mush that emerges are signals from every satellite in view.
+<p>
+All GPS satellites transmit on the same frequency, 1575.42 MHz, using direct sequence spread spectrum (DSSS).
+The L1 carrier is spread over a 2 MHz bandwidth and its strength at the Earth's surface is -130 dBm.
+Thermal noise power in the same bandwidth is -111 dBm, so a GPS signal at the receiving antenna is ~ 20 dB below the noise floor.
+That any of the signals present, superimposed one on another and buried in noise, 
+are recoverable after bi-level quantisation seems counter-intuitive!
+<p>
+GPS relies on the correlation properties of pseudo-random sequences called Gold Codes to separate signals from noise and each other.
+Every satellite transmits a unique sequence.
+All uncorrelated signals are noise, including those of other satellites and hard-limiter quantisation errors.
+Mixing with the same code in the correct phase de-spreads the wanted signal and further spreads everything else.
+Narrow-band filtering then removes wideband noise without affecting the (once again narrow) wanted signal.
+Hard-limiting (1-bit ADC) degrades SNR by less than 3 dB, a price worth paying to avoid hardware AGC.
+
+<h2>May 2013 Update </h2>
+This is now a truly portable, battery-powered, 12-channel GPS receiver with turnkey software,
+which acquires and tracks satellites, and continuously recalculates its position, without user-intervention.
+The complete system (below, left) comprises: 16x2 LCD display, <a href ="http://www.raspberrypi.org/">Raspberry Pi</a> Model "A" computer, two custom printed-circuit boards, commercial patch antenna and Li-Ion battery.
+Total system current consumption is 0.4A for a battery life of 5 hours.
+The Raspberry Pi is powered through the ribbon cable linking its GPIO header to the "Frac7" FPGA board and requires no other connections.
+<p>
+Currently, the Pi is running Raspbian Linux.
+A smaller distro would shorten time to first fix.
+After booting from SD-Card, the GPS application software starts automatically.
+On exit, it provides a means to properly shutdown the Pi before powering-off.
+Pi software development was done "head-less" via SSH and FTP over a USB Wi-Fi dongle. 
+Source code and documentation can be found towards the bottom of this page.
+<p>
+<table>
+<tr>
+<td><a href="BIG/Big_System.jpg"><img alt="" src="IMG/System.jpg" width=300 height=436></a></td>
+<td><a href="BIG/Big_Frac7.jpg"><img alt="" src="IMG/Frac7_682_436_40.jpg"  width=682 height=436></a></td>
+</tr>
+</table>
+<p>
+Both custom PCBs are simple 2-layer PTH boards with continuous ground planes on the bottom.
+Going clockwise around the Xilinx Spartan 3 on the "Frac7" FPGA board:
+from 12 o'clock to 3 o'clock are the loop filter, VCO, power splitter and prescaler of the microwave frequency synthesizer;
+bottom right are the joystick and JTAG connector; and, at 6 o'clock, a pin header for the Raspberry Pi ribbon cable.
+Far left is the LCD connector.
+Near left is a temperature-compensated voltage-controlled crystal oscillator (TCVCXO) providing a stable reference frequency, vital for GPS reception.
+<p>
+The TCVCXO is good; but not quite up to GPS standard when operating un-boxed in windy locations.
+Blowing on it displaces the 10.000000 MHz crystal oscillator by around 1 part in 10 million or 1 Hz,
+which is magnified 150 times by the synthesizer PLL.
+This is enough to momentarily unlock the satellite tracking loops, if done suddenly.
+The device is also slightly sensitive to infra-red e.g. from halogen bulbs and TV remotes!
+<p>
+When first posted in 2011, this was a four-channel receiver, meaning it could only track four satellites simultaneously.
+At least four are required to solve for user position and receiver clock bias; but greater accuracy is possible with more.
+In that original version, four identical instances of the "tracker" module filled the FPGA.
+But most of the flops were only clocked once per millisecond.
+Now, a custom "soft-core" CPU inside the FPGA serializes the processing
+and only 50% of the FPGA fabric is required for an 8-channel receiver or 67% for 12-channels.
+Number of channels is a parameter in the source and could go higher.
+<p>
+Positional accuracy is best when the antenna can see 360&deg; of sky and receive signals from all directions.
+Generally, the more satellites in view, the better.
+Two or more satellites on the same bearing can lead to what is termed "bad geometry."
+The best fix so far was &plusmn;1 metres at a very open location using 12 satellites;
+but accuracy is typically &plusmn;5 metres in poorer locations with fewer satellites.
+
+<h2>Architecture</h2>
+Processing is split between FPGA and Pi by complexity and urgency.
+The Pi handles math-intensive heavy-lifting at its own pace.
+The FPGA synthesizes the first local oscillator, services high-priority events in real-time and tracks satellites autonomously.
+The Pi controls the FPGA via an SPI interface.
+Conveniently, the same SPI is used to load the FPGA configuration bitstream and binary executable code for the embedded CPU.
+The FPGA can also be controlled via a Xilinx Platform USB JTAG cable from a Windows PC and auto-detects which interface is in use.
+<p> 
+<img alt="" width=948 height=107 src="IMG/Arch.gif">
+<p>
+L1 frequencies are down-converted to a 1st IF of 22.6 MHz by mixing with a 1552.82 MHz local oscillator on the "GPS3" front-end board.
+All subsequent IF and baseband signal processing is done digitally in the FPGA.
+Two proportional-integral (PI) controllers per satellite, track carrier and code phase.
+NAV data transmitted by the satellites is collected in FPGA memory.
+This is uploaded to the Pi, which checks parity and extracts ephemerides from the bit stream.
+When all required orbital parameters are collected, a snapshot is taken of certain internal FPGA counters,
+from which time of transmission is computed to &plusmn; 0.1 &micro;s precision.
+<p>
+Much of the 1552.82 MHz synthesizer is implemented in the FPGA.
+One might expect jitter problems, co-hosting a phase detector with other logic, but it works.
+Synthesizer output spectral-purity is excellent, even though the FPGA core is toggling away furiously and not all on harmonically-related frequencies.
+This approach was taken because a board similar to "Frac7" already existed from an earlier synthesizer project.
+Adding a front-end was the shortest route to a prototype receiver.
+But that first version was not portable: it had inconvenient power requirements and no on-board frequency standard. 
+
+<h2>Front-end</h2>
+Signal processing up to and including the hard-limiter:
+<p>
+<img alt="" width=1048 height=182 src="IMG/FrontEndBlock.gif">
+<p>
+The LMH7220 comparator has a maximum input offset voltage of 9.5mV.
+Amplified thermal noise must comfortably exceed this to keep it toggling.
+Weak GPS signals only influence the comparator near zero crossings!
+They are "sampled" by the noise!
+To estimate noise level at the comparator input we tabulate gains, insertion losses and noise figures:
+<p>
+<table border=1>
+    <tr>
+        <td></td>
+        <td align=right>LNA</td>
+        <td align=right>SAW</td>
+        <td align=right>Coax</td>
+        <td align=right>RF</td>
+        <td align=right>Mixer</td>
+        <td align=right>IF</td>
+        <td><b>Overall system noise figure</b></td>
+    </tr>
+    <tr>
+        <td>Gain</td>
+        <td align=right>+28</td>
+        <td align=right>-1.5</td>
+        <td align=right>-3.9</td>
+        <td align=right>+20</td>
+        <td align=right>-6</td>
+        <td></td>
+    </tr>
+    <tr>
+        <td>NF</td>
+        <td align=right>0.8</td>
+        <td align=right>1.5</td>
+        <td align=right>3.9</td>
+        <td align=right>2</td>
+        <td align=right>6</td>
+        <td align=right>7</td>
+        <td align=right><b>0.8 dB</b></td>
+    </tr>
+</table>
+<p>
+In-band noise at the mixer output is -174+0.8+28-1.5-3.9+20-6+10*log10(2.5e6) = -73 dBm or 52&micro;V RMS.
+The mixer is resistively terminated in 50-ohms and the stages thereafter work at higher impedance.
+The discrete IF strip has an overall voltage gain of 1000 so the comparator input level is 52mV RMS.
+<p>
+The LMH7220 adds 59 dB of gain making a total of 119 dB for the whole IF.
+Deploying so much gain at one frequency was a risk.
+To minimise it, balanced circuitry over a solid ground plane was used and screened twisted-pair carries the output to the FPGA.
+The motivation was simplicity, avoiding a second conversion.
+In practice, the circuit is stable, so the gamble paid-off.
+<p>
+<img alt="" width=1130 height=470 src="IMG/FrontEndSchematic.gif">
+<p>
+Active decoupler Q1 supplies 5V for the remote LNA.
+MMIC amplifier U2 provides 20 dB gain (not at IF!) and ensures low overall system noise figure, even if long antenna cables are used.
+L1 and L2 are hand-wound microwave chokes with very high self-resonant frequency, mounted perpendicular to one another and clear of the ground plane.
+Wind 14 turns, air-cored, 1mm inside diameter from 7cm lengths of 32swg enamelled copper wire.
+Checked with the tracking generator on a Marconi 2383 SA, these were good to 4 GHz.
+<p>
+The Mini-Circuits MBA-15L DBM was chosen for its low 6 dB conversion loss at 1.5 GHz and low 4 dBm LO drive requirement.
+R9 terminates the IF port.
+<p>
+Three fully-differential IF amplifier stages follow the mixer.
+Low-Q parallel tuned circuits strung between collectors set the -3 dB bandwidth around 2.5 MHz and prevent build-up of DC offsets.
+L4, L5 and L6 are screened Toko 7mm coils.
+The BFS17 was chosen for its high (but not too high) 1 GHz f<sub>T</sub>.
+I<sub>e</sub> is 2mA for lowest noise and reasonable &beta;r<sub>e</sub>.
+<p>
+The 22.6 MHz 1st IF is digitally down-converted to 2.6 MHz by under-sampling at 10 MHz in the FPGA.
+2.6 MHz lies close to the centre of the 5 MHz Nyquist bandwidth.
+It is best to avoid the exact centre, for reasons that will be explained later.
+Several other first IF frequencies are possible:
+27.5 MHz, which produces spectrum inversion at the 2nd IF, has also been tried successfully.
+There is a trade-off between image problems at lower and available BFS17 gain at higher frequencies.
+
+<h2>Search</h2>
+Signal detection entails resolving three unknowns: what satellites are in view, their Doppler shifts and code phases.
+A sequential search of this three-dimensional space from a so-called "cold start" could take many minutes.
+A "warm start" using almanac data to predict positions and velocities still requires a code search.
+All 1023 code phases must be tested to find the maximum correlation peak.
+Calculating 1023 correlation integrals in the time-domain is very expensive and redundant.
+This GPS receiver uses an FFT-based algorithm that tests all code phases in parallel.
+From cold, it takes 2.5 seconds on a 1.7 GHz Pentium to measure signal strength, Doppler shift and code phase of every visible satellite.
+The Raspberry Pi is somewhat slower.
+<p>
+With over-bar denoting conjugation, the cross-correlation function y(&Tau;) of complex signal s(t) and code c(t) shifted by offset &Tau; is:
+<br><img alt="" width=300 height=100 src="IMG/CCF_Eqn.gif"><br>
+<i>The Correlation Theorem</i> states that the Fourier transform of a correlation integral is equal to the product of the complex conjugate of the Fourier transform of the first function and the Fourier transform of the second function:
+<p>
+<tt>FFT(y) = CONJUGATE(FFT(s)) * FFT(c)</tt>
+<p>
+Correlation is performed at baseband.
+The 1.023 Mbps C/A code is 1023 chips or 1ms long.
+FFT length must be a multiple of this.
+Sampling at 10 MHz for 4 ms results in an FFT bin size of 250 Hz.
+41 Doppler shifts must be tested by rotating the frequency domain data, one bin at a time, up to &plusmn;20 bins = &plusmn;5 KHz.
+Rotation can be applied to either function.
+<p>
+<img alt="" width=1140 height=313 src="IMG/Search.gif">
+<p>
+The 22.6 MHz 1st IF from the 1-bit ADC is under-sampled by a 10 MHz clock in the FPGA, digitally down-converting it to a 2nd IF of 2.6 MHz.
+In software, the 2nd IF is down-converted to complex baseband (IQ) using quadrature local oscillators.
+For bi-level signals, the mixers are simple XOR gates.
+Although not shown above, the samples are temporarily buffered in FPGA memory.
+The Pi is not able to accept them at 10 Mbps.
+<p>
+1.023 Mbps and 2.6 MHz are generated by numerically-controlled-oscillator (NCO) phase accumulators.
+These frequencies are quite large compared to the sampling rate, and are not exact sub-harmonics of it.
+Consequently, the NCOs have fractional spurs.
+The number of samples per code chip dithers between 9 and 10.
+Fortunately, DSSS receivers are tolerant of narrow-band interferers, external or self-generated.
+<p>
+Complex baseband is transformed to the frequency domain by a forward FFT which need only be computed once.
+An FFT of each satellite's C/A code is pre-computed.
+Processing time is dominated by the inner-most loop which performs shifting, conjugation, complex multiplication and one inverse-FFT per satellite-Doppler test.
+Perhaps the Raspberry Pi's Videocore GPU could be leveraged to speed things up.
+<p>
+At 10 MHz sampling rate, code phase is resolved to the nearest 100ns.
+Typical CCF output is illustrated below:
+<br>
+<img alt="" width=1027 height=333 src="IMG/CCF_Graph.gif"><br>
+Calculating peak to average power over this data gives a good estimate of SNR and is used to find the strongest signals.
+The following were received at 20:14 GMT on 4 March 2011 in Cambridge, UK with the antenna on an outside North-facing window ledge:
+<p>
+<table border=1>
+<tr><td align=right>PRN</td><td>NAVSTAR</td><td>Doppler (Hz)</td><td>Code Phase</td><td align=center colspan=2>SNR</td></tr>
+<tr><td align=right>9 </td><td align=right>33</td><td align=right> 1500</td><td align=right>  2.4</td><td align=right width=75>95.3</td><td width=100><div class=bargraph style="width: 95.3%"></div></td></tr>
+<tr><td align=right>17</td><td align=right>57</td><td align=right>  500</td><td align=right>364.5</td><td align=right>98.4</td><td><div class=bargraph style="width: 98.4%"></div></td></tr>
+<tr><td align=right>22</td><td align=right>53</td><td align=right> 1000</td><td align=right>844.7</td><td align=right>54.1</td><td><div class=bargraph style="width: 54.1%"></div></td></tr>
+<tr><td align=right>27</td><td align=right>27</td><td align=right>    0</td><td align=right>770.0</td><td align=right>53.8</td><td><div class=bargraph style="width: 53.8%"></div></td></tr>
+<tr><td align=right>28</td><td align=right>48</td><td align=right>-3000</td><td align=right>103.9</td><td align=right>99.1</td><td><div class=bargraph style="width: 99.1%"></div></td></tr>
+</table>
+<p>
+From northern latitudes, more GPS satellites will generally be found in the southern sky i.e. towards the equator.
+
+<h2>Tracking</h2>
+Having detected a signal, the next step is locking on, tracking it and demodulating the 50 bps NAV data.
+This requires two inter-dependent phase locked loops (PLLs) to track code and carrier phase.
+These PLLs must operate in real-time and are implemented as DSP functions in the FPGA.
+Pi software has a supervisory role: deciding which satellites to track, monitoring the lock status and processing the received NAV data.
+<p>
+The tracking PLLs are good at maintaining lock, because they have very narrow loop bandwidths;
+however, this same characteristic makes them poor at acquiring lock without help.
+A PLL cannot "see" beyond loop bandwidth to capture anything further away.
+Initial phases and frequencies must be preset to the measured code phase and Doppler shift of the target satellite.
+This is orchestrated under Pi control.
+The loops should be in-lock from the outset and remain so.
+<p>
+Code phase is measured relative to the FFT sample.
+The code NCO in the FPGA is reset at the start of sampling and accumulates phase at a fixed 1.023 MHz.
+It is later aligned with the received code by briefly pausing the phase accumulator.
+Doppler shift on the 1575.42 MHz carrier is &plusmn;5 KHz or &plusmn;3 ppm.
+It also affects the 1.023 Mbps code rate by &plusmn;3 chips per second.
+The length of the pause is adjusted for code creep in the time since the sample was taken.
+Fortunately, code Doppler is proportional to carrier Doppler for which we have a good estimate.
+<h3>Hardware / software split</h3>
+In the diagram below, colour-coding shows how the implementation of the tracking DSP is now split between hardware and software.
+Previously, this was all done in hardware, with identical parallel instances repeated for each channel, making inefficient use of FPGA resources.
+Now, the slower 1 KHz processing is done by software, and twice as many channels can be accommodated in half the FPGA real-estate.
+<p>
+The six integrate-and-dump accumulators (&Sigma;) are latched into a shift register on the code epoch.
+A service request flag signals the CPU, which reads the data bit-serially.
+With 8 channels active, 8% of CPU time is spent executing the <tt>op_rdBit</tt> instruction!
+But there is plenty of time, and serial I/O uses FPGA fabric economically.
+Luxuries like RSSI and IQ logging (e.g. for scatter plots) can now be afforded.
+<p>
+The F(z) loop filter transfer functions swallow 2% of CPU bandwidth per active channel.
+These are standard proportional-integral (PI) controllers:
+64-bit precision is used and gain coefficients KI and KP, although restricted to powers of 2, are dynamically adjustable.
+Each channel having to wait its turn, NCO rate-updates can be delayed by tens or hundreds of microseconds after a code epoch; but this introduces negligible phase shift at frequencies where phase margin is determined.
+<p>
+<img alt="" width=1150 height=695 src="IMG/Tracking.gif">
+<p>
+Thin traces are 1-bit, notionally representing &plusmn;1.
+The 2.6 MHz carrier is first de-spread by mixing with early, late and punctual codes.
+I and Q complex baseband products from the second rank of XOR gate mixers are summed over 10000 samples or 1ms.
+This low-pass filtering dramatically reduces noise bandwidth and thereby raises SNR.
+Downsampling to 1 KHz necessitates wider onward data paths in the software domain.
+<p>
+Code phase is tracked using a conventional delay-locked loop or "early-late" gate.
+Power in the early and late channels is calculated using P = I<sup>2</sup> + Q<sup>2</sup> which is insensitive to phase.
+Early and late codes are one chip apart i.e. &frac12; chip ahead-of and behind punctual.
+This diagram helps to get the error sense correct:
+<br>
+<img alt="" width=1048 height=159 src="IMG/EarlyLate.gif">
+<p>
+A Costas Loop is used for carrier tracking and NAV data recovery in the punctual channel.
+NAV data, m, is taken from the I-arm sign bit with 180&deg; phase uncertainty.
+k is received signal amplitude and &theta; is phase difference between received carrier (sans modulation) and the local NCO.
+k varies from around 400 for the weakest recoverable signals up to over 2000 for the strongest.
+Notice how the error term fed back to the F(z) plant controller in the Costas Loop is proportional to received signal power k&sup2;.
+Tracking slope, and therefore loop gain, also vary with signal power in the code loop.
+Below is a Bode plot of open-loop gain for the Costas Loop at k=500:
+<table><tr>
+<td><img alt="" width=610 height=460 src="IMG/LoopFilter.gif"></td>
+<td><pre>
+// Scilab script
+// Bode plot: Costas carrier tracking loop
+
+rssi = 500;  // amplitude
+f1 = 10e6;   // 10 MHz
+f2 = 1e3;    //  1 KHz
+
+kPD = rssi^2;
+
+kNCO = 2 * %pi * (f1/f2) / (%z-1); 
+
+kI = 2^(20-64);
+kP = 2^(27-64);
+
+G = kPD * kNCO * (kP + kI/(%z-1));
+G.dt = 1/f2;
+
+scf(0);
+clf; 
+bode(-G, 1e-3, 500, 0.01);
+</pre></td>
+</tr></table>
+<p>
+<p>
+Costas Loop bandwidth is around 20 Hz, which is about optimal for carrier tracking.
+Code loop bandwidth is 1 Hz.
+Noise power in such bandwidths is small and the loops can track very weak signals.
+The above kI and kP work for most signals, but need dropping one notch for the very strongest.
+Scilab predicts, and scatter plots confirm, the onset of instability at k&ge;1500.
+Parity errors do not occur unless samples stray into the opposite half of the IQ plane.
+<p>
+<table>
+<tr>
+<td align=center>(i) <u>Instability at k&ge;1500</u></td>
+<td align=center>(ii) <u>Lock</u></td>
+<td align=center>(iii) <u>Phase error</u></td>
+</tr><tr>
+<td><img alt="" width=359 height=302 src="IMG/Scatter1.png"></td>
+<td><img alt="" width=359 height=302 src="IMG/Scatter2.png"></td>
+<td><img alt="" width=359 height=302 src="IMG/Scatter3.png"></td>
+</tr></table>
+<p>
+The amount of Doppler shift is always changing.
+Tracking a shifting carrier frequency requires a small, constant phase error at the loop filter input to drive the integrator.
+Insufficient kI integrator gain makes the phase error visible as a rotation of the scatter plot;
+and true or inverted NAV data appears in the sign-bit of the Q channel.
+<h2>Acquisition</h2>
+The code generator is aligned and both loop NCO frequencies are initially set using FFT search data.
+The initial carrier NCO can be up to 250 Hz (FFT bin size) off-frequency, placing it beyond loop capture range.
+Initial code rate error cannot exceed 0.16 Hz and the code loop is insensitive to carrier phase.
+If the signal is strong enough, the code loop always locks; but the carrier loop sometimes needs help.
+Fortunately, the exact carrier offset can be calculated from the locked code NCO, since both both exhibit the same Doppler shift.
+The carrier loop always locks once its NCO is so updated.
+<p>
+Before arriving at the above procedure, which seems to be 100% reliable, I just had to retry acquistion until the carrier loop locked.
+Fortunately, Doppler shift is constantly changing, and if one attempt failed, the next would often succeed.
+In stubborn cases, nudging the carrier NCO up or down by half an FFT bin-width proved effective.
+<p>
+Carriers close to the original IF centre frequency of 2.5 MHz were difficult to acquire, due to fractional spurs on the NCO.
+A huge improvement was obtained by shifting the IF frequency up 100 KHz.
+The first local oscillator was changed to 1552.82 MHz, moving the first and second IF frequencies to 22.6 MHz and 2.6 MHz respectively.
+<p>
+<table width=950>
+<tr>
+<td width=475 height=380><img alt="" width=435 height=357 src="IMG/2500050.png"></td>
+<td width=475>           <img alt="" width=435 height=357 src="IMG/2600050.png"></td>
+</tr>
+</table>
+These spectra show the carrier NCO set 50 Hz above IF centres of 2.5 and 2.6 MHz.
+The original centre frequency was one quarter of the sampling rate.
+The spurs are safely further away when the frequencies are not in a simple ratio.
+
+<h2>NAV data</h2>
+NAV data is taken from the sign-bit of the Costas Loop I-arm.
+The Q-arm should look like random noise.
+Below are 512 raw I<sub>p</sub>, Q<sub>p</sub> samples @ 1 KHz sampling rate:
+<br>
+<img alt="" width=1161 height=194 src="IMG/NAV.gif">
+<p>
+The following fragment of NAV data was received at 21:46:45 GMT on Tuesday 1st February 2011:
+<p>
+<table>    
+<tr><td class=navo>10001011</td><td class=nave>00001001010101</td><td class=navo>00</td><td class=nave>110100</td><td class=navo>01010001110001111</td><td class=nave>01</td><td class=navo>001</td><td class=nave>11</td><td class=navo>101100</td><td class=nave>100101010101000000000000010111100010110011111111110010110001010111111101010011011010011011110001010110110000110111000001011001001101000100010110111101110010001100001001111001011101111111111111111111101101011111111111011010110101101011100000</td></tr>
+<tr><td class=navo>10001011</td><td class=nave>00001001010101</td><td class=navo>00</td><td class=nave>110100</td><td class=navo>01010001110010000</td><td class=nave>01</td><td class=navo>010</td><td class=nave>01</td><td class=navo>100000</td><td class=nave>001101111111000000110111100010001011001100100010011100000100010001100011010011110000001111000011011010101011110111100001010110101011011100001101100111111101101101101001011110110000000011011000111000101010100100001111011000011001111111111000</td></tr>
+<tr><td class=navo>10001011</td><td class=nave>00001001010101</td><td class=navo>00</td><td class=nave>110100</td><td class=navo>01010001110010001</td><td class=nave>01</td><td class=navo>011</td><td class=nave>11</td><td class=navo>101000</td><td class=nave>000000000110001111011010001000101010011110010110011100000001000000000011000011011000110010101001100010110001110011010110001001010110000010110010001100000010110001010010111101100011000000000101010011011110011001110010000000100111011111000100</td></tr>
+<tr><td class=navo>10001011</td><td class=nave>00001001010101</td><td class=navo>00</td><td class=nave>110100</td><td class=navo>01010001110010010</td><td class=nave>01</td><td class=navo>100</td><td class=nave>01</td><td class=navo>010100</td><td class=nave>011111111010100110011001010110101010011010100110011001010000100110101001100110101001110101010101100110011001100110100110100110011011100110011001001111010101100101011011111111001001111111111111111111111111010110000000000000000000000010001100</td></tr>
+<tr><td class=navo>10001011</td><td class=nave>00001001010101</td><td class=navo>00</td><td class=nave>110100</td><td class=navo>01010001110010011</td><td class=nave>01</td><td class=navo>101</td><td class=nave>11</td><td class=navo>011100</td><td class=nave>011100110110001101010101000001000000111111111111111111110111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111010101010101010101010110100</td></tr>
+<tr><td class=navo>10001011</td><td class=nave>00001001010101</td><td class=navo>00</td><td class=nave>110100</td><td class=navo>01010001110010100</td><td class=nave>01</td><td class=navo>001</td><td class=nave>10</td><td class=navo>010100</td><td class=nave>100101010101000000000000010111100010110011111111110010110001010111111101010011011010011011110001010110110000110111000001011001001101000100010110111101110010001100001001111001011101111111111111111111101101011111111111011010110101101011100000</td></tr>
+<tr><td class=navo>10001011</td><td class=nave>00001001010101</td><td class=navo>00</td><td class=nave>110100</td><td class=navo>01010001110010101</td><td class=nave>01</td><td class=navo>010</td><td class=nave>11</td><td class=navo>111100</td><td class=nave>001101111111000000110111100010001011001100100010011100000100010001100011010011110000001111000011011010101011110111100001010110101011011100001101100111111101101101101001011110110000000011011000111000101010100100001111011000011001111111111000</td></tr>
+<tr><td class=navo>10001011</td><td class=nave>00001001010101</td><td class=navo>00</td><td class=nave>110100</td><td class=navo>01010001110010110</td><td class=nave>01</td><td class=navo>011</td><td class=nave>10</td><td class=navo>001100</td><td class=nave>000000000110001111011010001000101010011110010110011100000001000000000011000011011000110010101001100010110001110011010110001001010110000010110010001100000010110001010010111101100011000000000101010011011110011001110010000000100111011111000100</td></tr>
+<tr><td class=navo>10001011</td><td class=nave>00001001010101</td><td class=navo>00</td><td class=nave>110100</td><td class=navo>01010001110010111</td><td class=nave>01</td><td class=navo>100</td><td class=nave>11</td><td class=navo>001000</td><td class=nave>011110010101111000011000001100011110011101011100011000111000010001000000011010010111010101110111101111100011100010101101111001111000101010010111000010101010110111100000000010110010000000101010000000101011111100101010101010101010101010111100</td></tr>
+<tr><td class=navo>10001011</td><td class=nave>00001001010101</td><td class=navo>00</td><td class=nave>110100</td><td class=navo>01010001110011000</td><td class=nave>01</td><td class=navo>101</td><td class=nave>00</td><td class=navo>111100</td><td class=nave>010000001010101010101010101100101010101010101010101010111100101010101010101010101010111100101010101010101010101010111100101010101010101010101010111100101010101010101010101010111100101010101010101010101010111100101010101010101010101010111100</td></tr>
+</table>
+<p>
+The above are 2 consecutive frames of 5 subframes each.
+Subframes are 300-bits long and take 6 seconds to transmit.
+Column 1 is the preamble 10001011.
+This appears at the start of every subframe; but can occur anywhere in the data.
+The 17-bit counter in column 5 is time-of-week (TOW) and resets to zero at midnight Sunday.
+The 3-bit counter in column 7 is the subframe ID 1 through 5.
+Subframes 4 and 5 are subcommutated into 25 pages each and a complete data message comprising 25 full frames takes 12.5 minutes to transmit.
+I am only using data in subframes 1, 2 and 3 at present.
+
+<h2>Solving for user position</h2>
+Every GPS satellite transmits its position and the time.
+Subtracting time sent from time received and multiplying by the speed of light is how a receiver measures distance between itself and the satellites.  
+Doing so with three satellites would yield three simultaneous equations in three unknowns (user position: x, y, z) if the precise time was available.
+In practice, receiver clocks are not accurate enough, the exact time is a fourth unknown, four satellites are therefore required and four simultaneous equations must be solved:
+<p>
+<img alt="" width=350 height=160 src="IMG/Simultaneous.gif">
+<p>
+An iterative method is used because the equations are non-linear.
+Using earth's centre (0, 0, 0) and the approximate time as a starting point,
+the algorithm converges in only five or six iterations.
+The solution is found even if user clock error is large.
+The satellites carry atomic clocks; but these too have errors and
+correction coefficients in subframe 1 must be applied to the time of transmission.
+Typical adjustments can be hundreds of microseconds.
+<p>
+The uncorrected time of transmission is formed by scaling and adding several counters.
+Time-of-week (TOW) in seconds since midnight Sunday is sent every subframe.
+Data edges mark out 20ms intervals within 300-bit subframes.
+The code repeats 20 times per data bit.
+Code length is 1023 chips and chip rate is 1.023 Mbps.
+The code NCO is phase-locked to the signal and accumulated at 10 MHz.
+All this fixes time of transmission to &plusmn; 0.1 &micro;s.
+Faster NCO clocking could improve on this.
+<p>
+Satellite positions at the corrected transmission time are calculated using ephemeris in subframes 2 and 3.
+Orbital position at a reference time t_oe (time of ephemeris) is provided along with parameters allowing (x,y,z) position to be calculated up to a few hours before or after.
+Ephemerides are regularly updated and satellites only transmit their own.
+Long term orbits of the entire constellation can be predicted less accurately using Almanac data in subframes 4 and 5;
+however, this is not essential if a fast FFT-based search is used.
+<p>
+Solutions are computed in earth-centred, earth-fixed (ECEF) coordinates.
+User location is converted to latitude, longitude and altitude with a correction for eccentricity of the earth, which bulges at the equator.
+The scatter diagrams below illustrate repeatability, the benefit of averaging and the effect of poor satellite choices.
+Grid squares are 0.001&deg; or 111 metres on each side.
+Blue dots mark 1000 fixes.
+Yellow triangles mark the centres of gravity:
+<p>
+<table>
+<tr>
+<td align=center>(i) <u>North-facing window ledge</u></td>
+<td align=center>(ii) <u>Rooftop antenna</u></td>
+<td align=center>(iii) <u>East-facing window ledge</u></td>
+</tr>
+<tr>
+<td><img alt="" width=312 height=191 src="IMG/North.png"></td>
+<td><img alt="" width=312 height=191 src="IMG/Omni.png"> </td>
+<td><img alt="" width=312 height=191 src="IMG/East.png"> </td>
+</tr>
+</table>    
+The tight cluster (ii) was obtained using satellites in four different quarters of the sky.
+Only the rooftop antenna had a clear view in all directions.
+But good fixes were obtained by averaging, even when half the sky was obscured.
+Rooftop fixes also exhibit spreading like (i) and (iii) if the wrong satellites are chosen.
+<p>
+The above solutions were generated without compensating for ionospheric propagation delays using parameters in page 18 of subframe 4 which should be applied because this is a single frequency receiver.
+Ionospheric refraction increases path lengths between users and satellites.
+<p>
+In April 2012, I fixed a bug that caused significant errors in user-position solutions.
+Originally, by not transforming satellite positions from earth-centred-earth-fixed (ECEF) to earth-centred-inertial (ECI) coordinates,
+I was effectively ignoring Earth's rotation during the 60 to 80 ms that signals were in flight.
+I am now seeing positional solution accuracies of &plusmn; 5 metres after averaging, even with limited satellite visibility.  
+<p>
+I've created an <a href="user_position_solution.pdf">appendix</a> showing how the iterative solution is developed,
+starting from a geometric range equation,
+which is linearised using a Taylor Series expansion,
+and solved by matrix methods,
+for the special case of four satellites or the general case of more, 
+with the option of using weighted least-squares to control the influence of particular satellites.
+You'll find this and solution "C" source code in the links at the bottom of the page.
+<p> 
+I'm grateful to Dan Doberstein for sending me an early draft of his GPS book [<a href="http://www.dkdinst.com/gpstxt.html">2</a>] which helped me understand the solution algorithm.
+The official US government GPS Interface Specification [<a href="http://www.gps.gov/technical/icwg/IS-GPS-200E.pdf">3</a>] is an essential reference.
+
+<h2>Signal monitor</h2>
+<img alt="" width=654 height=183 src="IMG/LVDS_SA.gif">
+<p>
+The above circuit arrangement,
+mostly implemented in FPGA,
+de-spreads by taking the product of the 1-bit IF and punctual code,
+leaving 50 bps data modulation.
+A small notch due to BPSK carrier suppression can just be seen:
+<p>
+<table width=950>
+<tr>
+<td width=475 height=380><img alt="" width=432 height=357 src="IMG/Despread_1MHz.png"></td>
+<td width=475>           <img alt="" width=432 height=357 src="IMG/Despread_1KHz.png"></td>
+</tr>
+</table>
+<p>
+These spectra show the same de-spread transmission at different spans and resolution bandwidths (RBW).
+Doppler shift was -1.2 KHz.
+The noise floor is antenna thermal noise amplified and filtered by the IF strip.
+-3 dB bandwidth looks around 3 MHz, slightly wider than planned.
+The de-spread carrier is 5 dB above noise at 30 KHz RBW and 25 dB above at 300 Hz RBW.
+Received signal strength at the antenna can be estimated as -174+1+10*log10(30e3)+5 = -123 dBm.
+<p>
+It still amazes me how well frequency domain information is preserved through hard-limiting!
+The LVDS transmitter has a constant output current of ~3mA which is ~1mW in 100 ohms.
+Peak power seen at the SA cannot exceed 0 dBm.
+Here, we see this available power spread across a range of frequencies.
+Wideband integrated power spectral density must be ~1mW.
+<h2>First local oscillator</h2>
+I've been building experimental fractional-N synthesizers using general-purpose programmable logic for several years:
+<p>
+<table border=1>
+    <tr><td>Project</td> <td>Date</td> <td>Technology</td> <td>Frequency (MHz)</td></tr>
+    <tr><td><a href="../FracN/Synth.htm">FracN</a></td>       <td>2004</td><td>Altera MAX 7000 CPLD</td> <td align=center>4.3</td></tr>
+    <tr><td><a href="../Frac2/Main.htm">Frac2</a></td>        <td>2005</td><td>Altera MAX 7000 CPLD</td> <td align=center>15 - 25</td></tr>
+    <tr><td><a href="../Frac3/Main.htm">Frac3</a></td>        <td>2009</td><td>Xilinx Spartan 3 FPGA</td><td align=center>38 - 76</td></tr>
+    <tr><td><a href="../Frac3/Main.htm#May2009">Frac4</a></td><td>2009</td><td>Xilinx Spartan 3 FPGA</td><td align=center>38 - 76</td></tr>
+    <tr><td><a href="../Frac3/Main.htm#Frac5">Frac5</a></td>  <td>2010</td><td>Xilinx Spartan 3 FPGA</td><td align=center>800 - 1600</td></tr>
+    <tr><td>Frac7</td>                                        <td>2013</td><td>Xilinx Spartan 3 FPGA</td><td align=center>1500 - 1600</td></tr>
+</table>
+<p>
+Frac7 was built for this purpose; but I had no idea Frac5 would be used in a GPS receiver when I originally designed it.
+The photo below shows how the ROS-1455 VCO output on Frac5 was resistively split between the output SMA and a Hittite HMC363 divide-by-8 prescaler.
+The 200 MHz divider output is routed (differentially) into the FPGA which phase locks it to a master reference using methods documented in my earlier projects.
+Microwave circuity on Frac7 is similar; but uses a Mini-Circuits 3dB splitter.
+<p>
+<img alt="" width=550 height=349 src="IMG/1st_LO_CPW.jpg">
+<img alt="" width=550 height=349 src="IMG/1st_LO_CAD.gif">
+<p>
+High stability and low phase noise are achieved, as can be seen in the VCO output spectra shown below.
+When Frac5 was originally developed,
+as a dedicated frequency synthesizer,
+simultaneous toggling on frequencies not harmonically related was avoided to minimise intermodulation spurs.
+The FPGA was static when clock pulses that toggled phase detector output crossed the fabric.
+No such luxury is practical when the FPGA is hosting a GPS receiver; however, fortunately, the local oscillator output is good enough:
+<p>
+<table width=950>
+<tr>
+<td width=475 height=380><img alt="" width=432 height=357 src="IMG/1st_LO_100Hz.png"></td>
+<td width=475>           <img alt="" width=435 height=357 src="IMG/1st_LO_500KHz.png"></td>
+</tr>
+</table>
+<p>
+The Marconi 2383 spectrum analyser's 50 MHz STD OUTPUT was used as the master reference source for Frac5 and all internal GPS receiver clocks.
+GPS receivers need accuracies better than 1 ppm (parts per million) to measure &plusmn;5 KHz Doppler shifts on the 1575.42 MHz L1 carrier.
+Any frequency uncertainty would necessitate a wider search range.
+<h2>Embedded CPU</h2>
+My original GPS receiver could only track 4 satellites.
+The available fabric was not used efficiently and the FPGA was full.
+Identical logic was replicated for each channel and only clock-enabled at the 1 KHz code epoch.
+GPS update rates are quite un-demanding and most of the "parallel" processing can easily be done sequentially.
+Embedding a CPU for this task has both increased the number of channels and freed space in the FPGA.
+<p>
+This CPU directly executes FORTH primitives as native instructions.
+Visitors to my <a href="../Mk1/Architecture.htm">Mark 1 FORTH Computer</a> page will already be aware of my interest in the language.
+FORTH is not mainstream; and its use here might be an esoteric barrier; 
+however, I could not resist doing another FORTH CPU, this time in FPGA, after seeing the excellent <a href="http://excamera.com/sphinx/fpga-j1.html">J1</a> project, which was an inspiration.
+<p>
+<a href="http://en.wikipedia.org/wiki/Forth_(programming_language)">FORTH</a> is a stack-based language, which basically means the CPU has stacks instead of general purpose registers.
+Wikipedia has a good overview.
+
+<h3>Features</h3>
+<ul>
+    <li>FPGA resources: 360 slices + 2 BRAMs</li>
+    <li>Single-cycle instruction execution</li>
+    <li>FORTH-like, dual-stack architecture</li>
+    <li>32-bit stack and ALU data paths</li>
+    <li>64-bit double-precision operations</li>    
+    <li>Hardware multiplier</li>    
+    <li>2k byte (expandable to 4k byte) code and data RAM</li>
+    <li>Macro assembler code development</li>
+</ul>
+<h3>Memory and I/O</h3>
+Two BRAMs are used: one for main memory, the other for stacks.
+Xilinx block RAM is dual ported, allowing one instance to host both data and return stacks.
+Each stack pointer ranges over half of the array.
+Dual porting of the main memory permits data access concurrent with instruction fetch.
+One memory port is addressed by the program counter, the other by T, the top of stack.
+Writes to the PC-addressed port are also used for code download, the program counter providing incrementing addresses.
+<p>
+Code and data share the main memory, which is organised as 1024 (expandable to 2048) 16-bit words.
+Memory accesses can be 16-, 32- or 64-bits, word-aligned.
+All instructions are 16-bit.
+Total code plus data size of the GPS application is less than 750 words,
+despite all loops being unrolled.
+<p>
+I/O is not memory-mapped, occupying its own 36 bit-select space (12 in + 12 out + 12 events).
+One-hot encoding is used to simplify select decoding.    
+I/O operations are variously 1-bit serial, 16- or 32-bit parallel.
+Serial data shifts 1 bit per clock cycle.
+Events are used mainly as hardware strobes and differ from writes by not popping the stack.
+<h3>Instruction format</h3>
+<table border=1>
+<colgroup>
+<col width="25%">
+<col width="5%">
+<col width="5%">
+<col width="5%">
+<col width="5%">
+<col width="5%">
+<col width="5%">
+<col width="5%">
+<col width="5%">
+<col width="7%">
+<col width="4%">
+<col width="4%">
+<col width="4%">
+<col width="4%">
+<col width="4%">
+<col width="4%">
+<col width="4%">
+<thead><tr>
+<td style="border:0">&nbsp;</td>
+<td align=center>15</td>
+<td align=center>14</td>
+<td align=center>13</td>
+<td align=center>12</td>
+<td align=center>11</td>
+<td align=center>10</td>
+<td align=center>9</td>
+<td align=center>8</td>
+<td align=center>7</td>
+<td align=center>6</td>
+<td align=center>5</td>
+<td align=center>4</td>
+<td align=center>3</td>
+<td align=center>2</td>
+<td align=center>1</td>
+<td align=center>0</td>
+</tr></thead>
+<tr>
+<td>op_push</td>
+<td align=center>0</td>
+<td align=center colspan=15>literal [14:0]</td>
+</tr>
+<tr>
+<td>op_*</td>
+<td align=center>1</td>
+<td align=center>0</td>
+<td align=center>0</td>
+<td align=center colspan=5>opcode [12:8]</td>
+<td align=center>ret</td>
+<td align=center colspan=7>operand(s)</td>
+</tr>
+<tr>
+<td>op_call</td>
+<td align=center>1</td>
+<td align=center>0</td>
+<td align=center>1</td>
+<td align=center>0</td>
+<td align=center colspan=11>destination_address [11:1]</td>
+<td align=center>0</td>
+</tr>
+<tr>
+<td>op_branch</td>
+<td align=center>1</td>
+<td align=center>0</td>
+<td align=center>1</td>
+<td align=center>0</td>
+<td align=center colspan=11>destination_address [11:1]</td>
+<td align=center>1</td>
+</tr>
+<tr>
+<td>op_branchZ</td>
+<td align=center>1</td>
+<td align=center>0</td>
+<td align=center>1</td>
+<td align=center>1</td>
+<td align=center colspan=11>destination_address [11:1]</td>
+<td align=center>0</td>
+</tr>
+<tr>
+<td>op_branchNZ</td>
+<td align=center>1</td>
+<td align=center>0</td>
+<td align=center>1</td>
+<td align=center>1</td>
+<td align=center colspan=11>destination_address [11:1]</td>
+<td align=center>1</td>
+</tr>
+<tr>
+<td>op_rdReg</td>
+<td align=center>1</td>
+<td align=center>1</td>
+<td align=center>0</td>
+<td align=center>0</td>
+<td align=center colspan=12>input_select [11:0]</td>
+</tr>
+<tr>
+<td>op_wrReg</td>
+<td align=center>1</td>
+<td align=center>1</td>
+<td align=center>0</td>
+<td align=center>1</td>
+<td align=center colspan=12>output_select [11:0]</td>
+</tr>
+<tr>
+<td>op_wrEvt</td>
+<td align=center>1</td>
+<td align=center>1</td>
+<td align=center>1</td>
+<td align=center>0</td>
+<td align=center colspan=12>event_select [11:0]</td>
+</tr>
+</table>
+<p>
+24 instructions out of a possible 32 are currently allocated in the opcode space h80XX - h9FXX.
+These are mostly zero-operand stack / ALU operations.
+The "ret" option, which performs return from subroutine, executes in parallel, in the same cycle.
+Add-immediate is the only one-operand instruction.
+A carry-in option extends (stack, implied) addition precision.
+hF0000 - hFFFF is spare.
+<h3>Precision</h3>
+Stack and ALU data paths are 32-bit; however, 16-, 32- and 64-bit operations are supported.
+64-bit values occupy two places on the stack, with least significant bits on top.
+Top of stack, T, and next on stack, N, are registered outside the BRAM for efficiency.
+Apart from the 64-bit left shift (op_shl64) which is hard-wired for single-cycle execution,
+all other double precision functions are software subroutines.
+<h3>Assembly language</h3>
+The GPS embedded binary was created using Microsoft's Macro Assembler MASM.
+This only supports x86 mnemonics; but opcodes are declared using equ and code is assembled using "dw" directives.  
+MASM not only provides label resolution, macro expansion and expression evaluation but even data structures!
+The MASM dup() operator is used extensively to unroll loops e.g. <tt>dw N dup(op_call + dest)</tt> calls a subroutine N times.
+<p>
+This fragment gives some flavour of source style.  Stack-effect is commented on every line:
+<p>
+<pre>
+op_store64      <span class=B>equ</span> op_call + $             <span class=G>; [63:32] [31:0] a         17 cycles</span>
+                <span class=B>dw</span> op_store32               <span class=G>; [63:32] a</span>
+                <span class=B>dw</span> op_addi + 4              <span class=G>; [63:32] a+4</span>
+                <span class=G>; drop through</span>
+op_store32      <span class=B>equ</span> op_call + $             <span class=G>; [31:0] a                  8 cycles</span>
+                <span class=B>dw</span> op_over                  <span class=G>; [31:0] a [31:0]</span>
+                <span class=B>dw</span> op_swap16                <span class=G>; [15:0] a [31:16]</span>
+                <span class=B>dw</span> op_over                  <span class=G>; [15:0] a [31:16] a</span>
+                <span class=B>dw</span> op_addi + 2              <span class=G>; [15:0] a [31:16] a+2</span>
+                <span class=B>dw</span> op_store16, op_drop      <span class=G>; [15:0] a</span>
+                <span class=B>dw</span> op_store16 + opt_ret     <span class=G>; a</span>
+</pre>
+<ul>
+    <li><tt>op_fetch16</tt> and <tt>op_store16</tt> are primitives.</li>
+    <li><tt>op_store32</tt> and <tt>op_store64</tt> are subroutines or "compound instructions" usable as if they were primitives.</li>
+    <li>T is actually <tt>[15:0,31:16]</tt> after <tt>op_swap16</tt>, but we don't care about the upper 16-bits here.</li>
+    <li><tt>op_store16</tt> leaves the address; stack depth can only change &plusmn;1 per cycle.</li>
+    <li>Purists might prefer: <tt>dw N + addi</tt></li>
+</ul>
+<h3>Host serial interfaces</h3>
+The FPGA can be controlled via SPI by the Raspberry Pi, or by a Windows PC using a Xilinx Platform USB JTAG cable.
+There are two levels of request priority:
+<p>
+<table border=1>
+<tr><td>Priority</td><td>SPI select</td><td>JTAG IR</td><td>Function</td></tr>
+<tr><td>Highest</td><td>SPI_CS[0]</td><td>USER1</td><td>Halt embedded CPU and load new code image</td></tr>
+<tr><td>Lowest</td><td>SPI_CS[1]</td><td>USER2</td><td>Send new command and poll for response to previous</td></tr>
+</table>
+<p>
+New code images are copied to main memory via a third BRAM which bridges the CPU and serial clock domains.
+Thus downloaded, binary images execute automatically.
+Host commands are captured in the bridge BRAM and the CPU is signalled to action them.
+Its responses are collected by the host from the bridge on the next scan.
+<p>
+The top-level main loop polls for host service requests.
+The first word of any host message is a command code.
+Requests are dispatched through the <tt><span class=R>Commands</span></tt> jump table:
+<pre>
+                <span class=B>dw</span> op_rdReg + JTAG_RX       <span class=G>; cmd</span>
+                <span class=B>dw</span> op_shl                   <span class=G>; offset</span>
+                <span class=B>dw</span> <span class=R>Commands</span>, op_add         <span class=G>; &amp;Commands[cmd]</span>
+                <span class=B>dw</span> op_fetch16               <span class=G>; vector</span>
+                <span class=B>dw</span> op_to_r, op_ret  
+</pre>
+<ul>
+    <li><tt>op_to_r</tt> moves <tt><span class=G>vector</span></tt> to the return stack.</li>
+</ul>
+Some host requests (e.g. CmdGetSamples) elicit lengthy responses.
+Data ports on the CPU side of the bridge are 16-bit.
+The CPU can read and write these via the data stack;
+however, more direct paths exist for uploading main memory and GPS IF samples.
+The instruction <tt>op_wrEvt + GET_MEMORY</tt> transfers a memory word directly to the bridge, using T as an auto-incrementing pointer.
+GET_MEMORY is the only event which has stack effect.
+The instruction <tt>op_wrEvt + GET_SAMPLES</tt> transfers 16 bits from the IF sampler:
+<pre>
+UploadSamples:  <span class=B>dw</span> 16 <span class=B>dup</span> (op_wrEvt + GET_SAMPLES)     <span class=G>;  16*16 =  256 samples copied</span>
+                <span class=B>dw</span> op_ret
+</pre><pre>              
+CmdGetSamples:  <span class=B>dw</span> op_wrEvt + JTAG_RST                 <span class=G>; addr = 0</span>
+                <span class=B>dw</span> 16 <span class=B>dup</span> (op_call + UploadSamples)    <span class=G>; 256*16 = 4096 samples copied</span>
+                <span class=B>dw</span> op_ret
+</pre>
+Unrolling loops at assembly time with <tt>dup()</tt> trades code size for performance, avoiding a decrement-test-branch hit;
+and the entire application binary  is still tiny;
+however, long loops must be nested, as illustrated above.
+
+<h3>CHANNEL data structure</h3>
+An array of structures holds state variables and buffered NAV data for the channels.
+MASM has excellent support for data structures.
+Field offsets are automatically defined as constants and the <tt>sizeof</tt> operator is useful.
+<pre>
+MAX_BITS        <span class=B>equ</span> 64
+
+CHANNEL         <span class=B>struct</span>
+ch_NAV_MS       <span class=B>dw</span> ?                        <span class=G>; Milliseconds 0 ... 19</span>
+ch_NAV_BITS     <span class=B>dw</span> ?                        <span class=G>; Bit count</span>
+ch_NAV_PREV     <span class=B>dw</span> ?                        <span class=G>; Last data bit = ip[15]</span>
+ch_NAV_BUF      <span class=B>dw</span> MAX_BITS/16 <span class=B>dup</span> (?)      <span class=G>; NAV data buffer</span>
+ch_CA_FREQ      <span class=B>dq</span> ?                        <span class=G>; Loop integrator</span>
+ch_LO_FREQ      <span class=B>dq</span> ?                        <span class=G>; Loop integrator</span>
+ch_IQ           <span class=B>dw</span> 2 <span class=B>dup</span> (?)                <span class=G>; Last IP, QP</span>
+ch_CA_GAIN      <span class=B>dw</span> 2 <span class=B>dup</span> (?)                <span class=G>; KI, KP</span>
+ch_LO_GAIN      <span class=B>dw</span> 2 <span class=B>dup</span> (?)                <span class=G>; KI, KP</span>
+CHANNEL         <span class=B>ends</span>
+
+Chans:          CHANNEL NUM_CHANS <span class=B>dup</span> (&lt;&gt;)
+</pre>
+The epoch service routine (labelled <tt>Method:</tt>) is called with a pointer to a CHANNEL structure on the stack.
+Affecting OO-airs, stack-effect comments refer to it as "this" throughout the routine.
+A copy is conveniently kept on the return stack for accessing structure members like so:
+<pre>
+                <span class=B>dw</span> op_r                     <span class=G>; ... this</span>
+                <span class=B>dw</span> op_addi + ch_NAV_MS      <span class=G>; ... &amp;ms</span>
+                <span class=B>dw</span> op_fetch16               <span class=G>; ... ms</span>
+</pre>
+The <tt>Chans</tt> array is regularly uploaded to the host.
+
+<h2>Raspberry Pi application software</h2>
+The Raspberry Pi software is multi-tasked using what are variously known as coroutines, continuations, user-mode or light-weight threads.
+These co-operatively yield control, in round-robin fashion, using the "C" library <tt>setjmp/longjmp</tt> non-local goto,
+avoiding the cost of a kernel context-switch:
+<pre>
+<span class=B>void</span> NextTask() {
+    <span class=B>static int</span> id;
+    if (setjmp(Tasks[id].jb)) <span class=B>return</span>;
+    if (++id==NumTasks) id=0;
+    longjmp(Tasks[id].jb, 1);
+}
+</pre>
+Up to 16 threads can be active:
+<p>
+<table border=1>
+<tr><td>Source</td><td>Instances</td><td>Purpose</td></tr>
+<tr><td>main.cpp</td>   <td> 1</td><td>Initialisation; polling joystick; exit</td></tr>
+<tr><td>user.cpp</td>   <td> 1</td><td>User interface</td></tr>
+<tr><td>search.cpp</td> <td> 1</td><td>Signal detection</td></tr>
+<tr><td>channel.cpp</td><td>12</td><td>Acquisition, tracking and NAV data collection</td></tr>
+<tr><td>solve.cpp</td>  <td> 1</td><td>User-position solution</td></tr>
+</table>
+<p>
+Coding as threads, each responsible for one task, produces more readable code.
+Other source files include:
+<p>
+<table border=1>
+<tr><td>Source</td><td>Purpose</td></tr>
+<tr><td>auto.sh</td><td>Auto-start; and shutdown properly on exit</td></tr>
+<tr><td>cacode.h</td><td>PRBS generator</td></tr>
+<tr><td>coroutines.cpp</td><td>User-mode threading</td></tr>
+<tr><td>ephemeris.*</td><td>Ephemeris database</td></tr>
+<tr><td>gps.h</td><td>Main header file</td></tr>
+<tr><td>peri.cpp</td><td>BCM2835 peripherals</td></tr>
+<tr><td>Print.h</td><td>Base class for LCD driver</td></tr>
+<tr><td>spi.*</td><td>SPI interface to FPGA</td></tr>
+</table>
+<p>
+
+There is no Arduino in this project, but its LCD driver files <a href="http://code.google.com/p/arduino/source/browse/trunk/libraries/LiquidCrystal/LiquidCrystal.cpp">LiquidCrystal.cpp</a> and <a href="http://code.google.com/p/arduino/source/browse/trunk/libraries/LiquidCrystal/LiquidCrystal.h">LiquidCrystal.h</a> are used.
+
+<h2>Source code</h2>
+<h3>2013 (Latest)</h3>
+<ul>
+    <li><a href="/GPS/SRC/2013/ASM/">ASM</a> Embedded CPU FORTH</li>
+    <li><a href="/GPS/SRC/2013/Verilog/">Verilog</a> Spartan 3 FPGA</li>
+    <li><a href="/GPS/SRC/2013/C++/">C++</a> Raspberry Pi</li>
+</ul>
+<h3>Older versions (Win32 C++)</h3>
+<ul>
+    <li><a href="/GPS/SRC/2012/">2012</a></li>
+    <li><a href="/GPS/SRC/2011/">2011</a></li>
+</ul>
+<h2>Schematics</h2>
+<ul>
+    <li><a href="/GPS/SCH/GPS3_schematic.pdf">GPS3</a> front-end</li>
+    <li><a href="/GPS/SCH/Frac7_schematic.pdf">Frac7</a> FPGA</li>
+</ul>
+<h2>Links and resources</h2>
+<ul>
+    <li><a href="user_position_solution.pdf">User position solution</a> derivation</li>
+    <li><a href="http://www.n2yo.com/whats-up/?c=20">N2YO </a> live tracking of GPS satellites above your horizon</li>
+    <li><a href="http://celestrak.com/GPS/">Celestrak</a> daily GPS ephemeris TLE (two line element) updates</li>    
+    <li><a href="http://celestrak.com/NORAD/documentation/spacetrk.pdf">SPACETRACK Report No. 3</a> mathematical models for processing orbital elements</li>
+    <li><a href="http://celestrak.com/software/dransom/stsplus.html">STSPlus</a> orbital tracking software</li>
+    <li><a href="http://kom.aau.dk/~borre/masters/receiver/z-count.pdf">How to locate the preamble in NAV data</a></li>
+    <li><a href="http://rhodesmill.org/pyephem/">PyEphem</a> Python library for astronomical computations</li>
+    <li><a href="/GPS/SRC/2011/Python/Doppler.py">Doppler.py</a> Python script for predicting GPS satellite Doppler shifts</li>
+    <li><a href="http://www.gps.gov/technical/icwg/">www.gps.gov/technical/icwg</a> GPS documentation</li>
+</ul>
+
+<h2>References</h2>
+1. <a href="http://lea.hamradio.si/~s53mv/navsats/theory.html">GPS/GLONASS receiver</a> Matja&#x017E; Vidmar, S53MV<br>
+2. <a href="http://www.dkdinst.com/gpstxt.html">PRINCIPLES OF GPS RECEIVERS - A HARDWARE APPROACH</a> by Dan Doberstein<br>
+3. <a href="http://www.gps.gov/technical/icwg/IS-GPS-200E.pdf">IS-GPS-200E</a> GPS Interface Specification<br>
+
+<p>
+<hr>
+<table class=Footer width="100%">
+<tr>
+<td width="33%">Copyright © Andrew Holme, 2011.</td>
+<td width="33%" align=center>&nbsp;</td>
+<td width="33%" align=right>
+<a id=anc href="mailto:"><img id=env src="../IMG/Envelope.gif" class=NoBorder alt="Requires javascript"></a>
+<img src="../IMG/email.gif" alt="e-mail">
+<script language="javascript" type="text/javascript" src="../Footer.js"></script>
+</td>
+</tr>
+</table>
+</body>
+</html>

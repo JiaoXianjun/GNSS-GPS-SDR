@@ -1,0 +1,7 @@
+matlab script:
+gps_wav_log2bin('HDSDR_20140421_080645Z_1574800kHz_RF.wav');
+
+
+Then:
+hackrf_transfer -s 2800000 -f 1574800000 -t HDSDR_20140421_080645Z_1574800kHz_RF.bin
+
