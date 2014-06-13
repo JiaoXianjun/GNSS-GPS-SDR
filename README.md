@@ -1,6 +1,18 @@
 GNSS-GPS-SDR
 ============
 
+*NEWS:
+
+ADS-B out is verified by HACKRF --> air --> rtl-sdr dongle.
+
+See adsb directory and video:
+
+http://youtu.be/xpLDqBkUiKc  (out of China)
+
+http://v.youku.com/v_show/id_XNzE4NzIzNDIw.html  (in China)
+
+*Purpose:
+
 Playing with GNSS/GPS by HACKRF and rtl-sdr SDR.
 
 Type "make" to generate "gps_test" program.
