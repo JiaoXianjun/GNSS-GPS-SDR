@@ -3,6 +3,8 @@ GNSS-GPS-SDR
 
 *NEWS:
 
+14 Aug. 2014: Losing job. Finding new opportunity!
+
 ADS-B out is verified by HACKRF --> air --> rtl-sdr dongle.
 
 See adsb directory and video:
