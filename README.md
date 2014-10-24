@@ -3,8 +3,6 @@ GNSS-GPS-SDR
 
 *NEWS:
 
-**14 Aug. 2014: Losing job. Finding new opportunity! (Find my profile at <a href="https://www.researchgate.net/profile/Xianjun_Jiao?ev=hdr_xprf">researchgate</a> and <a href="http://www.linkedin.com/pub/xianjun-jiao/41/696/7a5">linkedin</a>)**
-
 ADS-B out is verified by HACKRF --> air --> rtl-sdr dongle.
 
 See adsb directory and video:
