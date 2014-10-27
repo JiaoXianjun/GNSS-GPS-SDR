@@ -1,7 +1,9 @@
 GNSS-GPS-SDR
 ============
 
-*NEWS:
+See detailed introduction on my tech blog: [Some efforts on GPS signal replay (GPS重放)](http://sdr-x.github.io/Some%20efforts%20on%20GPS%20signal%20replay%20%28GPS%E9%87%8D%E6%94%BE%29/)
+
+-------------*NEWS:----------------------------------------------------
 
 ADS-B out is verified by HACKRF --> air --> rtl-sdr dongle.
 
@@ -11,7 +13,7 @@ http://youtu.be/xpLDqBkUiKc  (out of China)
 
 http://v.youku.com/v_show/id_XNzE4NzIzNDIw.html  (in China)
 
-*Purpose:
+---------------*Purpose:----------------------------------------------
 
 Playing with GNSS/GPS by HACKRF and rtl-sdr SDR.
 
