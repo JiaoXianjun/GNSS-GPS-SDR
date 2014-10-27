@@ -5,7 +5,7 @@ See detailed introduction on my tech blog: [Some efforts on GPS signal replay (G
 
 -------------*NEWS:----------------------------------------------------
 
-ADS-B out is verified by HACKRF --> air --> rtl-sdr dongle.
+ADS-B out is verified by HACKRF --> air --> rtl-sdr dongle. [blog](http://sdr-x.github.io/ADS-B%20out%20by%20HACKRF%20and%20received%20over%20the%20air%20by%20rtl-sdr%20dongle%20and%20dump1090/)
 
 See adsb directory and video:
 
