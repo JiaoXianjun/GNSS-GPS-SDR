@@ -1,5 +1,5 @@
-H = cacode.h ephemeris.h gps.h LiquidCrystal.h Print.h spi.h
-C = channel.cpp coroutines.cpp ephemeris.cpp LiquidCrystal.cpp main.cpp peri.cpp search.cpp solve.cpp spi.cpp user.cpp
-F = -lrt -lfftw3f
-a.out:	$(H) $(C)
-	g++ $(F) $(C)
+H = cacode.h gps_offline.h
+C = search_offline.cpp test_search_offline.cpp
+F = -lfftw3f -lm 
+all:	$(H) $(C)
+	g++ /usr/lib/libfftw.a $(C) $(F) -o gps_test
