@@ -1,13 +1,13 @@
 GNSS-GPS-SDR
 ============
 
-See detailed introduction on my tech blog: [Some efforts on GPS signal replay (GPS重放)](http://sdr-x.github.io/Some%20efforts%20on%20GPS%20signal%20replay%20%28GPS%E9%87%8D%E6%94%BE%29/)
+See detailed introduction on my tech blog: [Some efforts on GPS signal replay (GPS重放)](https://sdr-x.github.io/Some-efforts-and-tools-on-GPS-signal-replay-(GPS%E9%87%8D%E6%94%BE%E6%A8%A1%E6%8B%9F)/)
 
 -------------*NEWS:----------------------------------------------------
 
 Use GPS replay to play pokemon go? See here: https://github.com/JiaoXianjun/poke-move
 
-ADS-B out is verified by HACKRF --> air --> rtl-sdr dongle. [blog](http://sdr-x.github.io/ADS-B%20out%20by%20HACKRF%20and%20received%20over%20the%20air%20by%20rtl-sdr%20dongle%20and%20dump1090/)
+ADS-B out is verified by HACKRF --> air --> rtl-sdr dongle. [blog](https://sdr-x.github.io/ADS-B-out-by-HACKRF-and-received-over-the-air-by-rtl-sdr-dongle-and-dump1090/)
 
 See adsb directory and video:
 
