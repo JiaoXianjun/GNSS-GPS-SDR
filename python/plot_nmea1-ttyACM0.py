@@ -1,26 +1,26 @@
 import serial
 import time
 import curses
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 
-# Map NMEA system prefixes to labels
+# NMEA system prefix to GNSS label
 SYSTEM_LABELS = {
     '$GP': 'GPS',
     '$GA': 'Galileo',
     '$GL': 'GLONASS',
     '$GB': 'Beidou',
-    '$BD': 'Beidou'  # $BD is sometimes used instead of $GB
+    '$BD': 'Beidou'  # Some modules use $BD instead of $GB for Beidou
 }
 
-# Store satellite data
+# Satellite data: system -> {PRN: SNR}
 satellite_data = {
-    'GPS': [],
-    'Galileo': [],
-    'GLONASS': [],
-    'Beidou': []
+    'GPS': {},
+    'Galileo': {},
+    'GLONASS': {},
+    'Beidou': {}
 }
 
-# Store fix and time info
+# Fix info and time data
 fix_info = {
     'utc_time': '',
     'local_time': '',
@@ -29,29 +29,23 @@ fix_info = {
     'pdop': ''
 }
 
-# Parse GSV (GNSS Satellites in View) message
 def parse_gsv(fields, system):
+    """Parse GSV message and return list of (PRN, SNR) tuples."""
+    sats = []
     try:
-        total_sentences = int(fields[1])
-        sentence_num = int(fields[2])
-        sats_in_view = int(fields[3])
-
-        sats = []
         for i in range(4, len(fields) - 4, 4):
             prn = fields[i]
-            elevation = fields[i+1]
-            azimuth = fields[i+2]
             snr = fields[i+3] if fields[i+3] != '' else '0'
             sats.append((prn, snr))
-        return sats
-    except (ValueError, IndexError):
-        return []
+    except (IndexError, ValueError):
+        pass
+    return sats
 
-# Parse GGA (fix data)
 def parse_gga(fields):
+    """Parse GGA message for UTC time."""
     try:
         utc_raw = fields[1]
-        if utc_raw:
+        if utc_raw and len(utc_raw) >= 6:
             hour = int(utc_raw[0:2])
             minute = int(utc_raw[2:4])
             second = int(utc_raw[4:6])
@@ -61,8 +55,8 @@ def parse_gga(fields):
     except Exception:
         pass
 
-# Parse GSA (GNSS DOP and Active Satellites)
 def parse_gsa(fields):
+    """Parse GSA message for DOP info."""
     try:
         fix_info['pdop'] = fields[15]
         fix_info['hdop'] = fields[16]
@@ -87,9 +81,8 @@ def display(stdscr, ser):
             if 'GSV' in line:
                 sats = parse_gsv(fields, system)
                 if system and sats:
-                    satellite_data[system] += sats
-                    # Keep latest ~16 sats only
-                    satellite_data[system] = satellite_data[system][-16:]
+                    for prn, snr in sats:
+                        satellite_data[system][prn] = snr
 
             elif 'GGA' in line:
                 parse_gga(fields)
@@ -97,7 +90,7 @@ def display(stdscr, ser):
             elif 'GSA' in line:
                 parse_gsa(fields)
 
-            # Update screen
+            # Clear and update screen
             stdscr.erase()
             stdscr.addstr(0, 2, "GNSS Monitor", curses.A_BOLD | curses.A_UNDERLINE)
 
@@ -105,12 +98,22 @@ def display(stdscr, ser):
             for sys_name in satellite_data:
                 stdscr.addstr(row, 2, f"{sys_name} Satellites:", curses.A_BOLD)
                 row += 1
-                for prn, snr in satellite_data[sys_name]:
+
+                valid_prns = []
+                for prn in satellite_data[sys_name]:
+                    try:
+                        valid_prns.append((int(prn), prn))
+                    except ValueError:
+                        continue  # Skip non-numeric PRNs
+
+                for _, prn in sorted(valid_prns):
+                    snr = satellite_data[sys_name][prn]
                     stdscr.addstr(row, 4, f"PRN: {prn: <4}  SNR: {snr: >3} dBHz")
                     row += 1
+
                 row += 1
 
-            # Display fix info
+            # Time Info
             stdscr.addstr(row, 2, "Time Info:", curses.A_BOLD)
             row += 1
             stdscr.addstr(row, 4, f"UTC Time:   {fix_info.get('utc_time', '')}")
@@ -118,9 +121,14 @@ def display(stdscr, ser):
             stdscr.addstr(row, 4, f"Local Time: {fix_info.get('local_time', '')}")
             row += 2
 
+            # Accuracy Info
             stdscr.addstr(row, 2, "Fix Accuracy:", curses.A_BOLD)
             row += 1
-            stdscr.addstr(row, 4, f"PDOP: {fix_info.get('pdop', '')}  HDOP: {fix_info.get('hdop', '')}  VDOP: {fix_info.get('vdop', '')}")
+            stdscr.addstr(
+                row,
+                4,
+                f"PDOP: {fix_info.get('pdop', '')}  HDOP: {fix_info.get('hdop', '')}  VDOP: {fix_info.get('vdop', '')}"
+            )
 
             stdscr.refresh()
             time.sleep(0.1)
@@ -133,7 +141,7 @@ def display(stdscr, ser):
             time.sleep(1)
 
 def main():
-    port = '/dev/ttyUSB0'  # Update if your device uses a different port
+    port = '/dev/ttyACM0'  # Update this to match your GNSS module's device path
     baudrate = 115200
     try:
         with serial.Serial(port, baudrate, timeout=1) as ser:
